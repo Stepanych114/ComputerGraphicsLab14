@@ -1,0 +1,64 @@
+# Build artifacts
+*.o
+*.obj
+*.ko
+*.mod.c
+*.mod
+*.a
+*.so
+*.exe
+*.out
+*.app
+*.lo
+*.la
+*.ln
+*.d
+
+# Build directories
+build/
+bin/
+obj/
+Debug/
+Release/
+x64/
+Win32/
+
+# IDE specific files
+.vscode/
+.idea/
+*.suo
+*.user
+*.ncb
+*.aps
+*.ilk
+*.pdb
+*.ipch
+*.log
+*.bak
+*.sbr
+*.bsc
+*.vcproj.*.filters
+*.vcxproj.user
+*.vcxproj.filters
+*.sln.docstates
+*.vs/
+*.DS_Store # macOS specific
+
+# CMake specific files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+_CPack_Packages/
+
+# Other temporary files
+*~
+*.swp
+*.tmp
+
+!cube.obj
+!pillar.obj
+!floor.obj
+!pyramid.obj
+!gem.obj
