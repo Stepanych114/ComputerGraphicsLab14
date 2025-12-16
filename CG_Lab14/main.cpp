@@ -7,6 +7,20 @@
 #include <sstream>
 #include <iostream>
 #include <cmath>
+#include <iomanip>
+
+bool g_pointLightOn = true;
+bool g_directionalLightOn = true;
+bool g_spotLightOn = true;
+
+GLfloat g_pointLightPos[] = { 0.0f, 5.0f, 0.0f, 1.0f };
+float g_pointLightIntensity = 1.0f;
+
+GLfloat g_directionalLightDir[] = { -1.0f, -1.0f, -1.0f, 0.0f };
+
+GLfloat g_spotLightPos[] = { -3.0f, 4.0f, -3.0f, 1.0f };
+float g_spotLightAngle = 25.0f;
+
 
 struct Vector3 {
     float x, y, z;
@@ -26,6 +40,27 @@ struct Mesh {
     std::vector<Vertex> vertices;
     GLuint textureID;
 };
+
+void setPhongMaterial(float r, float g, float b, float shininess) {
+    GLfloat ambient[] = { 0.1f * r, 0.1f * g, 0.1f * b, 1.0f };
+    GLfloat diffuse[] = { r, g, b, 1.0f };
+    GLfloat specular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT, ambient);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, diffuse);
+    glMaterialfv(GL_FRONT, GL_SPECULAR, specular);
+    glMaterialf(GL_FRONT, GL_SHININESS, shininess);
+}
+
+void setToonMaterial(float r, float g, float b) {
+    GLfloat ambient[] = { 0.2f * r, 0.2f * g, 0.2f * b, 1.0f };
+    GLfloat diffuse[] = { r, g, b, 1.0f };
+    GLfloat specular[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT, ambient);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, diffuse);
+    glMaterialfv(GL_FRONT, GL_SPECULAR, specular);
+    glMaterialf(GL_FRONT, GL_SHININESS, 0.0f);
+}
+
 
 Mesh loadObj(const std::string& filename) {
     std::vector<Vector3> temp_pos;
@@ -143,16 +178,22 @@ int main() {
     settings.depthBits = 24;
     settings.stencilBits = 8;
     settings.antialiasingLevel = 4;
-    settings.majorVersion = 3;
-    settings.minorVersion = 0;
+    settings.majorVersion = 2;
+    settings.minorVersion = 1;
 
-    sf::Window window(sf::VideoMode(800, 600), "Static Scene No Lighting", sf::Style::Default, settings);
+    sf::Window window(sf::VideoMode(800, 600), "Interactive Lighting Scene", sf::Style::Default, settings);
     window.setVerticalSyncEnabled(true);
     window.setActive(true);
 
     glewInit();
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_NORMALIZE);
+    glShadeModel(GL_SMOOTH);
+
+    GLfloat global_ambient[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, global_ambient);
 
     Mesh floor = loadObj("floor.obj");
     floor.textureID = createTexture(100, 100, 100);
@@ -174,8 +215,48 @@ int main() {
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed) window.close();
             if (event.type == sf::Event::Resized) glViewport(0, 0, event.size.width, event.size.height);
+
+            if (event.type == sf::Event::KeyPressed) {
+                float move_speed = 0.5f;
+                float angle_speed = 2.0f;
+                float intensity_speed = 0.1f;
+                float dir_speed = 0.1f;
+
+                switch (event.key.code) {
+                case sf::Keyboard::Num1: g_pointLightOn = !g_pointLightOn; std::cout << "Point light: " << (g_pointLightOn ? "ON" : "OFF") << std::endl; break;
+                case sf::Keyboard::Num2: g_directionalLightOn = !g_directionalLightOn; std::cout << "Directional light: " << (g_directionalLightOn ? "ON" : "OFF") << std::endl; break;
+                case sf::Keyboard::Num3: g_spotLightOn = !g_spotLightOn; std::cout << "Spotlight: " << (g_spotLightOn ? "ON" : "OFF") << std::endl; break;
+
+                case sf::Keyboard::W: g_pointLightPos[2] -= move_speed; break;
+                case sf::Keyboard::S: g_pointLightPos[2] += move_speed; break;
+                case sf::Keyboard::A: g_pointLightPos[0] -= move_speed; break;
+                case sf::Keyboard::D: g_pointLightPos[0] += move_speed; break;
+                case sf::Keyboard::Q: g_pointLightPos[1] += move_speed; break;
+                case sf::Keyboard::E: g_pointLightPos[1] -= move_speed; break;
+                case sf::Keyboard::Up: g_pointLightIntensity += intensity_speed; if (g_pointLightIntensity > 5.0f) g_pointLightIntensity = 5.0f; break;
+                case sf::Keyboard::Down: g_pointLightIntensity -= intensity_speed; if (g_pointLightIntensity < 0.0f) g_pointLightIntensity = 0.0f; break;
+
+                case sf::Keyboard::T: g_directionalLightDir[1] += dir_speed; break;
+                case sf::Keyboard::G: g_directionalLightDir[1] -= dir_speed; break; 
+                case sf::Keyboard::F: g_directionalLightDir[0] -= dir_speed; break; 
+                case sf::Keyboard::H: g_directionalLightDir[0] += dir_speed; break; 
+
+
+                case sf::Keyboard::I: g_spotLightPos[2] -= move_speed; break;
+                case sf::Keyboard::K: g_spotLightPos[2] += move_speed; break;
+                case sf::Keyboard::J: g_spotLightPos[0] -= move_speed; break;
+                case sf::Keyboard::L: g_spotLightPos[0] += move_speed; break;
+                case sf::Keyboard::U: g_spotLightPos[1] += move_speed; break;
+                case sf::Keyboard::O: g_spotLightPos[1] -= move_speed; break;
+                case sf::Keyboard::Left: g_spotLightAngle -= angle_speed; if (g_spotLightAngle < 0.0f) g_spotLightAngle = 0.0f; break;
+                case sf::Keyboard::Right: g_spotLightAngle += angle_speed; if (g_spotLightAngle > 90.0f) g_spotLightAngle = 90.0f; break;
+
+                default: break;
+                }
+            }
         }
 
+        glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glMatrixMode(GL_PROJECTION);
@@ -191,32 +272,79 @@ int main() {
 
         setLookAt(10.0f, 8.0f, 10.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f);
 
+        if (g_pointLightOn) {
+            glEnable(GL_LIGHT0);
+            GLfloat intensity[] = { 1.0f * g_pointLightIntensity, 0.8f * g_pointLightIntensity, 0.8f * g_pointLightIntensity, 1.0f };
+            glLightfv(GL_LIGHT0, GL_POSITION, g_pointLightPos);
+            glLightfv(GL_LIGHT0, GL_DIFFUSE, intensity);
+            glLightfv(GL_LIGHT0, GL_SPECULAR, intensity);
+        }
+        else {
+            glDisable(GL_LIGHT0);
+        }
+
+        if (g_directionalLightOn) {
+            glEnable(GL_LIGHT1);
+            GLfloat light_intensity[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+            glLightfv(GL_LIGHT1, GL_POSITION, g_directionalLightDir);
+            glLightfv(GL_LIGHT1, GL_DIFFUSE, light_intensity);
+            glLightfv(GL_LIGHT1, GL_SPECULAR, light_intensity);
+        }
+        else {
+            glDisable(GL_LIGHT1);
+        }
+
+        if (g_spotLightOn) {
+            glEnable(GL_LIGHT2);
+            GLfloat light_intensity[] = { 1.0f, 1.0f, 0.5f, 1.0f };
+            GLfloat spot_direction[] = {
+                0.0f - g_spotLightPos[0],
+                2.0f - g_spotLightPos[1],
+                0.0f - g_spotLightPos[2]
+            };
+            glLightfv(GL_LIGHT2, GL_POSITION, g_spotLightPos);
+            glLightfv(GL_LIGHT2, GL_SPOT_DIRECTION, spot_direction);
+            glLightf(GL_LIGHT2, GL_SPOT_CUTOFF, g_spotLightAngle);
+            glLightf(GL_LIGHT2, GL_SPOT_EXPONENT, 15.0f);
+            glLightfv(GL_LIGHT2, GL_DIFFUSE, light_intensity);
+            glLightfv(GL_LIGHT2, GL_SPECULAR, light_intensity);
+        }
+        else {
+            glDisable(GL_LIGHT2);
+        }
+
+        setPhongMaterial(0.7f, 0.7f, 0.7f, 32.0f);
         drawMesh(floor);
 
         glPushMatrix();
         glTranslatef(0.0f, 2.0f, 0.0f);
         glScalef(1.5f, 1.5f, 1.5f);
+        setPhongMaterial(0.9f, 0.9f, 0.2f, 128.0f);
         drawMesh(gem);
         glPopMatrix();
 
         glPushMatrix();
         glTranslatef(-3.0f, 0.5f, -3.0f);
         glRotatef(30.0f, 0.0f, 1.0f, 0.0f);
+        setToonMaterial(0.8f, 0.2f, 0.2f);
         drawMesh(cube);
         glPopMatrix();
 
         glPushMatrix();
         glTranslatef(3.0f, 0.0f, 3.0f);
+        setPhongMaterial(0.2f, 0.8f, 0.2f, 16.0f);
         drawMesh(pyramid);
         glPopMatrix();
 
         glPushMatrix();
         glTranslatef(-3.0f, 1.5f, 3.0f);
+        setToonMaterial(0.2f, 0.2f, 0.8f);
         drawMesh(pillar);
         glPopMatrix();
 
         glPushMatrix();
         glTranslatef(3.0f, 0.5f, -3.0f);
+        setPhongMaterial(0.8f, 0.2f, 0.2f, 64.0f);
         drawMesh(cube);
         glPopMatrix();
 
