@@ -35,59 +35,195 @@ const char* vertexShaderSource = R"(
 )";
 
 const char* fragmentShaderSource = R"(
-    #version 330 core
-    out vec4 FragColor;
+#version 330 core
+out vec4 FragColor;
 
-    in vec2 TexCoord;
-    in vec3 FragPos;
-    in vec3 Normal;
+in vec2 TexCoord;
+in vec3 FragPos;
+in vec3 Normal;
 
-    uniform sampler2D texture1;
+uniform sampler2D texture1;
 
-    struct PointLight {
-        vec3 position;
-        vec3 color;
-        float intensity;
-    };
+struct PointLight {
+    vec3 position;
+    vec3 color;
+    float intensity;
+};
+struct DirLight {
+    vec3 direction;
+    vec3 color;
+    float intensity;
+};
+struct SpotLight {
+    vec3 position;
+    vec3 direction;
+    float cutOff;
+    vec3 color;
+    float intensity;
+};
 
-    struct DirLight {
-        vec3 direction;
-        vec3 color;
-        float intensity;
-    };
+uniform PointLight pointLight;
+uniform DirLight dirLight;
+uniform SpotLight spotLight;
+uniform vec3 viewPos;
 
-    struct SpotLight {
-        vec3 position;
-        vec3 direction;
-        float cutOff;
-        vec3 color;
-        float intensity;
-    };
+// 0 - Phong, 1 - Toon, 2 - Ambient-Guch
+uniform int lightingModel;
 
-    uniform PointLight pointLight;
-    uniform DirLight dirLight;
-    uniform SpotLight spotLight;
-    uniform vec3 viewPos;
+// Флаги включения света
+uniform int pointLightOn;
+uniform int dirLightOn;
+uniform int spotLightOn;
 
-    void main() {
-        vec3 norm = normalize(Normal);
-        vec3 viewDir = normalize(viewPos - FragPos);
+vec3 phongLighting(vec3 norm, vec3 viewDir, vec3 texColor) {
+    vec3 result = vec3(0.0);
+
+    if(dirLightOn == 1){
         vec3 lightDir = normalize(-dirLight.direction);
         float diff = max(dot(norm, lightDir), 0.0);
         vec3 diffuse = diff * dirLight.color * dirLight.intensity;
+
+        vec3 reflectDir = reflect(-lightDir, norm);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+        vec3 specular = spec * dirLight.color * dirLight.intensity;
+
+        result += texColor * diffuse + specular;
+    }
+
+    if(pointLightOn == 1){
         vec3 plDir = normalize(pointLight.position - FragPos);
         float plDiff = max(dot(norm, plDir), 0.0);
         vec3 pointDiffuse = plDiff * pointLight.color * pointLight.intensity;
+
+        vec3 reflectDir = reflect(-plDir, norm);
+        float spec = pow(max(dot(viewDir, reflectDir),0.0),32.0);
+        vec3 specular = spec * pointLight.color * pointLight.intensity;
+
+        result += texColor * pointDiffuse + specular;
+    }
+
+    if(spotLightOn == 1){
         vec3 slDir = normalize(spotLight.position - FragPos);
         float theta = dot(normalize(-spotLight.direction), slDir);
-        float intensity = clamp((theta - spotLight.cutOff) / (1.0 - spotLight.cutOff), 0.0, 1.0);
-        float slDiff = max(dot(norm, slDir), 0.0);
+        float intensity = clamp((theta - spotLight.cutOff)/(1.0-spotLight.cutOff),0.0,1.0);
+        float slDiff = max(dot(norm, slDir),0.0);
         vec3 spotDiffuse = slDiff * spotLight.color * spotLight.intensity * intensity;
-        vec3 texColor = texture(texture1, TexCoord).rgb;
-        vec3 result = texColor * (diffuse + pointDiffuse + spotDiffuse);
-        FragColor = vec4(result, 1.0);
+
+        vec3 reflectDir = reflect(-slDir, norm);
+        float spec = pow(max(dot(viewDir, reflectDir),0.0),32.0);
+        vec3 specular = spec * spotLight.color * spotLight.intensity * intensity;
+
+        result += texColor * spotDiffuse + specular;
     }
+
+    return result;
+}
+
+vec3 toonLighting(vec3 norm, vec3 viewDir, vec3 texColor) {
+    vec3 result = vec3(0.0);
+
+    if(dirLightOn == 1){
+        vec3 lightDir = normalize(-dirLight.direction);
+        float diff = dot(norm, lightDir);
+        if(diff > 0.95) diff = 1.0;
+        else if(diff > 0.5) diff = 0.7;
+        else if(diff > 0.25) diff = 0.4;
+        else diff = 0.1;
+        result += texColor * diff * dirLight.color * dirLight.intensity;
+    }
+
+    if(pointLightOn == 1){
+        vec3 plDir = normalize(pointLight.position - FragPos);
+        float diff = dot(norm, plDir);
+        if(diff > 0.95) diff = 1.0;
+        else if(diff > 0.5) diff = 0.7;
+        else if(diff > 0.25) diff = 0.4;
+        else diff = 0.1;
+        result += texColor * diff * pointLight.color * pointLight.intensity;
+    }
+
+    if(spotLightOn == 1){
+        vec3 slDir = normalize(spotLight.position - FragPos);
+        float theta = dot(normalize(-spotLight.direction), slDir);
+        float intensity = clamp((theta - spotLight.cutOff)/(1.0-spotLight.cutOff),0.0,1.0);
+        float diff = dot(norm, slDir);
+        if(diff > 0.95) diff = 1.0;
+        else if(diff > 0.5) diff = 0.7;
+        else if(diff > 0.25) diff = 0.4;
+        else diff = 0.1;
+        result += texColor * diff * spotLight.color * spotLight.intensity * intensity;
+    }
+
+    return result;
+}
+
+vec3 ambientGuchLighting(vec3 norm, vec3 viewDir, vec3 texColor) {
+    float sigma = 0.5;
+    float sigma2 = sigma*sigma;
+    float A = 1.0 - (sigma2 / (2.0*(sigma2+0.33)));
+    float B = 0.45 * sigma2 / (sigma2 + 0.09);
+
+    vec3 color = vec3(0.0);
+    vec3 L, H, V = normalize(viewDir);
+    float NL, NV = max(dot(norm,V),0.0);
+    float theta_i, theta_r, alpha, beta, gamma;
+
+    vec3 L_proj, V_proj;
+
+    if(dirLightOn == 1){
+        L = normalize(-dirLight.direction);
+        NL = max(dot(norm,L),0.0);
+        theta_i = acos(NL);
+        theta_r = acos(NV);
+        alpha = max(theta_i, theta_r);
+        beta = min(theta_i, theta_r);
+        L_proj = normalize(L - norm*dot(L,norm));
+        V_proj = normalize(V - norm*dot(V,norm));
+        gamma = max(dot(L_proj,V_proj),0.0);
+        color += texColor * dirLight.color * dirLight.intensity * NL * (A + B*gamma*sin(alpha)*tan(beta));
+    }
+
+    if(pointLightOn == 1){
+        L = normalize(pointLight.position - FragPos);
+        NL = max(dot(norm,L),0.0);
+        theta_i = acos(NL);
+        alpha = max(theta_i, theta_r);
+        beta = min(theta_i, theta_r);
+        L_proj = normalize(L - norm*dot(L,norm));
+        gamma = max(dot(L_proj,V_proj),0.0);
+        color += texColor * pointLight.color * pointLight.intensity * NL * (A + B*gamma*sin(alpha)*tan(beta));
+    }
+
+    if(spotLightOn == 1){
+        L = normalize(spotLight.position - FragPos);
+        NL = max(dot(norm,L),0.0);
+        theta_i = acos(NL);
+        alpha = max(theta_i, theta_r);
+        beta = min(theta_i, theta_r);
+        L_proj = normalize(L - norm*dot(L,norm));
+        gamma = max(dot(L_proj,V_proj),0.0);
+        float theta = dot(normalize(-spotLight.direction), L);
+        float intensity = clamp((theta - spotLight.cutOff)/(1.0-spotLight.cutOff),0.0,1.0);
+        color += texColor * spotLight.color * spotLight.intensity * NL * (A + B*gamma*sin(alpha)*tan(beta)) * intensity;
+    }
+
+    return color;
+}
+
+void main() {
+    vec3 norm = normalize(Normal);
+    vec3 viewDir = normalize(viewPos - FragPos);
+    vec3 texColor = texture(texture1, TexCoord).rgb;
+    vec3 color = vec3(0.0);
+
+    if(lightingModel == 0) color = phongLighting(norm, viewDir, texColor);
+    else if(lightingModel == 1) color = toonLighting(norm, viewDir, texColor);
+    else if(lightingModel == 2) color = ambientGuchLighting(norm, viewDir, texColor);
+
+    FragColor = vec4(color, 1.0);
+}
 )";
+
 
 struct Vector3 { float x, y, z; };
 struct Vector2 { float u, v; };
@@ -277,6 +413,10 @@ struct DirLight { Vector3 direction; Vector3 color; float intensity; };
 struct SpotLight { Vector3 position; Vector3 direction; float cutOff; Vector3 color; float intensity; };
 
 int main() {
+    bool pointLightEnabled = true;
+    bool dirLightEnabled = true;
+    bool spotLightEnabled = true;
+    int lightingModel = 0;
     sf::ContextSettings settings;
     settings.depthBits = 24;
     settings.majorVersion = 3;
@@ -313,6 +453,17 @@ int main() {
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed) window.close();
             if (event.type == sf::Event::Resized) glViewport(0, 0, event.size.width, event.size.height);
+
+
+            if (event.type == sf::Event::KeyPressed) {
+                if (event.key.code == sf::Keyboard::Num4) pointLightEnabled = !pointLightEnabled;
+                if (event.key.code == sf::Keyboard::Num5) dirLightEnabled = !dirLightEnabled;
+                if (event.key.code == sf::Keyboard::Num6) spotLightEnabled = !spotLightEnabled;
+
+                if (event.key.code == sf::Keyboard::Num1) lightingModel = 0;
+                if (event.key.code == sf::Keyboard::Num2) lightingModel = 1;
+                if (event.key.code == sf::Keyboard::Num3) lightingModel = 2;
+            }
         }
 
 
@@ -344,6 +495,9 @@ int main() {
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::U)) dirLight.intensity += 0.1f;
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::J)) dirLight.intensity -= 0.1f;
 
+        glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), lightingModel);
+
+
         glUniform3f(glGetUniformLocation(shaderProgram, "pointLight.position"), pointLight.position.x, pointLight.position.y, pointLight.position.z);
         glUniform3f(glGetUniformLocation(shaderProgram, "pointLight.color"), pointLight.color.x, pointLight.color.y, pointLight.color.z);
         glUniform1f(glGetUniformLocation(shaderProgram, "pointLight.intensity"), pointLight.intensity);
@@ -366,6 +520,11 @@ int main() {
         Mat4 view = createLookAt(eye, center, up);
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view.m);
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection.m);
+        
+        glUniform1i(glGetUniformLocation(shaderProgram, "pointLightOn"), pointLightEnabled ? 1 : 0);
+        glUniform1i(glGetUniformLocation(shaderProgram, "dirLightOn"), dirLightEnabled ? 1 : 0);
+        glUniform1i(glGetUniformLocation(shaderProgram, "spotLightOn"), spotLightEnabled ? 1 : 0);
+
         GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
         glUniform3f(viewPosLoc, eye.x, eye.y, eye.z);
         glUniform3f(glGetUniformLocation(shaderProgram, "pointLight.position"), pointLight.position.x, pointLight.position.y, pointLight.position.z);
@@ -379,6 +538,8 @@ int main() {
         glUniform1f(glGetUniformLocation(shaderProgram, "spotLight.cutOff"), spotLight.cutOff);
         glUniform3f(glGetUniformLocation(shaderProgram, "spotLight.color"), spotLight.color.x, spotLight.color.y, spotLight.color.z);
         glUniform1f(glGetUniformLocation(shaderProgram, "spotLight.intensity"), spotLight.intensity);
+
+       // glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), 0);
         {
             Mat4 model = Mat4::identity();
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.m);
@@ -387,6 +548,7 @@ int main() {
             glBindVertexArray(floor.vao);
             glDrawArrays(GL_TRIANGLES, 0, floor.vertexCount);
         }
+        //glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), 2);
         {
             Mat4 model = Mat4::scale(1.5f, 1.5f, 1.5f);
             Mat4 trans = Mat4::translate(0.0f, 2.0f, 0.0f);
@@ -396,6 +558,7 @@ int main() {
             glBindVertexArray(gem.vao);
             glDrawArrays(GL_TRIANGLES, 0, gem.vertexCount);
         }
+        //glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), 1);
         {
             Mat4 rot = Mat4::rotateY(30.0f);
             Mat4 trans = Mat4::translate(-3.0f, 0.5f, -3.0f);
@@ -405,6 +568,7 @@ int main() {
             glBindVertexArray(cube.vao);
             glDrawArrays(GL_TRIANGLES, 0, cube.vertexCount);
         }
+       // glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), 0);
         {
             Mat4 model = Mat4::translate(3.0f, 0.0f, 3.0f);
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.m);
@@ -412,6 +576,7 @@ int main() {
             glBindVertexArray(pyramid.vao);
             glDrawArrays(GL_TRIANGLES, 0, pyramid.vertexCount);
         }
+       // glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), 1);
         {
             Mat4 model = Mat4::translate(-3.0f, 1.5f, 3.0f);
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.m);
@@ -419,6 +584,7 @@ int main() {
             glBindVertexArray(pillar.vao);
             glDrawArrays(GL_TRIANGLES, 0, pillar.vertexCount);
         }
+       // glUniform1i(glGetUniformLocation(shaderProgram, "lightingModel"), 0);
         {
             Mat4 model = Mat4::translate(3.0f, 0.5f, -3.0f);
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.m);
